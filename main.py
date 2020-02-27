@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import cv2
 
 from misc_utils import get_last_packet
+from misc_map_tools import make_map
 
 
 VELODYNE_PORT = 2368
@@ -31,26 +32,195 @@ for i in range(36000):
 
 
 
+
+WRITE_VIDEO = False
+vid_out = None
+if len(sys.argv) > 1:
+    WRITE_VIDEO = True
+    filename = sys.argv[1]
+    vid_out = cv2.VideoWriter('cam_video.mjpg', cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'), 10, (800, 800))
+
+DO_NETWORK = True
+IMG_RECV_ADDRESS = ('127.0.0.1', 53521)
+
+DO_GUI = True
+
 class Visualizer:
     def __init__(self):
         height = 800
-        width = 1400
+        width = 800
         self._X_MIN = 2
         self._Y_MIN = 2
         self._X_MAX = (width - 3)
         self._Y_MAX = (height - 3)
 
-        self.__map = np.ones((height, width, 3), np.uint8) * 255
+        #self.__map = np.ones((height, width, 3), np.uint8) * 255
+        self.__map = make_map(800, 800, 50)
+        cv2.circle(self.__map, (400, 400), 3, (120,64,0), 2)
         self._map = np.copy(self.__map)
         self._prev_azimuth = 0
         self._count = 0
-        #self._d_azimuth_history = []
+        self._d_azimuth_history = []
+
+
+    def draw_a_line(self, rho, theta, color):
+        cosTheta = np.cos(theta)
+        sinTheta = np.sin(theta)
+        x0 = rho * cosTheta
+        y0 = rho * sinTheta
+        #m = rho * sinTheta / cosTheta
+        #b = y0 - m * x0
+
+        x1 = int(x0 - 1000 * sinTheta)
+        y1 = int(y0 + 1000 * cosTheta)
+        x2 = int(x0 + 1000 * sinTheta)
+        y2 = int(y0 - 1000 * cosTheta)
+
+        d_y = 400 - y0
+        x_center = 0
+        try:
+            d_x = (d_y / cosTheta) * sinTheta
+            x_center = int(round(x0 - d_x))
+        except:
+            pass
+
+        cv2.line(self.img,(x1,y1),(x2,y2),color,2)
+        return x_center
+
+    def draw_hough_lines(self):
+        gray = cv2.bitwise_not(self.img)
+        lines = cv2.HoughLines(gray[:, :, 0], 1, np.radians(1), 100)
+        #,
+        #            min_theta=np.radians(60.0),
+        #            max_theta=np.radians(120.0)
+        #)
+
+        #usable = False
+        left_side = []
+        right_side = []
+        if lines is not None:
+            self.lines = lines
+            for line in lines:
+                rho, theta = line[0]
+                if theta < np.radians(30) or theta > np.radians(150):
+                    print(rho, theta)
+                    x_center = self.draw_a_line(rho, theta, (255,0,0))
+                    cv2.circle(self.img, (x_center, 400), 3, (0,0,0), 2)
+
+                    if theta > (np.pi / 2.0):
+                        theta -= np.pi
+
+                    vec_x = np.sin(theta)
+                    vec_y = np.cos(theta)
+
+                    print("x:", x_center)
+                    if x_center < 395:
+                        left_side.append( (x_center, vec_x, vec_y))
+                    elif x_center > 405:
+                        right_side.append( (x_center, vec_x, vec_y))
+
+        _y_center = 400
+        if len(left_side) and len(right_side):
+            self._left_side = left_side
+            self._right_side = right_side
+
+            _l = np.array(left_side)
+            _x_center = int(round(_l[:, 0].mean()))
+            _xx = int(round(-100 * _l[:, 1].mean()))
+            _yy = int(round(-100 * _l[:, 2].mean()))
+
+            x2 = _x_center - _xx
+            y2 = _y_center + _yy
+
+            cv2.line(self.img, (_x_center, _y_center), (x2, y2), (0,0,200),3)
+
+            _r = np.array(right_side)
+            _x_center = int(round(_r[:, 0].mean()))
+            _xx = int(round(-100 * _r[:, 1].mean()))
+            _yy = int(round(-100 * _r[:, 2].mean()))
+
+            x2 = _x_center - _xx
+            y2 = _y_center + _yy
+
+            cv2.line(self.img, (_x_center, _y_center), (x2, y2), (0,0,200),3)
+
+            _x_center_avg = int(round( 0.5 * (_l[:, 0].mean() + _r[:, 0].mean())))
+            avg_x = 0.5 * (_l[:, 1].mean() + _r[:, 1].mean())
+            avg_y = 0.5 * (_l[:, 2].mean() + _r[:, 2].mean())
+
+            _xx =  200 * avg_x
+            _yy =  200 * avg_y
+            #x2 = int(round(avg_x - _xx))
+            #y2 = int(round(avg_y - _yy))
+            x2 = int(round(_x_center_avg + _xx))
+            y2 = int(round(_y_center - _yy))
+            x0 = int(round(_x_center_avg - _xx))
+            y0 = int(round(_y_center + _yy))
+
+            cv2.line(self.img, (x0, y0), (x2, y2), (0,255,0),2)
+
+
+            x_target = int(round(_x_center_avg + 100 * avg_x))
+            y_target = int(round(_y_center - 100 * avg_y))
+
+            cv2.arrowedLine(self.img, (400, 400), (x_target, y_target), (0,0,0), 2, 8)
+
+
 
     def show_map(self):
-        img = self._map
+        self.img = self._map
         self._map = np.copy(self.__map)
-        cv2.imshow('asdf', img)
+        self.draw_hough_lines()
+
+        if DO_NETWORK:
+            _nothing, pngBuffer = cv2.imencode('*.png', self.img)
+            bufLen = len(pngBuffer)
+            filepos = 0
+            numbytes = 0
+            START_MAGIC = b"__HylPnaJY_START_PNG %09d\n" % (bufLen)
+            lidar_sock.sendto(START_MAGIC, IMG_RECV_ADDRESS)
+            while filepos < bufLen:
+                if (bufLen - filepos) < 1400:
+                    numbytes = bufLen - filepos
+                else:
+                    numbytes = 1400  # ethernet MTU is 1500
+                lidar_sock.sendto(pngBuffer[filepos:(filepos+numbytes)], IMG_RECV_ADDRESS)
+                filepos += numbytes
+            STOP_MAGIC = b"_g1nC_EOF"
+            lidar_sock.sendto(STOP_MAGIC, IMG_RECV_ADDRESS)
+
+        if DO_GUI:
+            cv2.imshow('asdf', self.img)
+            cv2.waitKey(1)
+        if WRITE_VIDEO:
+            vid_out.write(self.img)
+
+
+
+    def __not_used__showLines(self):
+        lines = cv2.HoughLines(self.img[:, 0], 1, np.pi / 180, 150, None, 0, 0)
+        
+        if lines is None:
+            print('no lines :-(')
+            return
+
+        cdst = np.copy(self.img)
+        self.lines = lines
+        for i in range(0, len(lines)):
+            rho = lines[i][0][0]
+            theta = lines[i][0][1]
+            a = np.cos(theta)
+            b = np.sin(theta)
+            x0 = a * rho
+            y0 = b * rho
+            pt1 = (int(x0 + 1000*(-b)), int(y0 + 1000*(a)))
+            pt2 = (int(x0 - 1000*(-b)), int(y0 - 1000*(a)))
+
+            cv2.line(cdst, pt1, pt2, (0,0,255), 2, cv2.LINE_AA)
+
+        cv2.imshow('qwerty', cdst)
         cv2.waitKey(1)
+
 
     def parse_data_block(self, data_block):
         flag, azimuth = struct.unpack('HH', data_block[:4])
@@ -64,11 +234,8 @@ class Visualizer:
             #print(self._count)
             self._count = 0
 
-        #    d_azimuth = azimuth - self._prev_azimuth + 36000
-        #else:
-        #    d_azimuth = azimuth - self._prev_azimuth
-
-        #self._d_azimuth_history.append(d_azimuth)
+        d_azimuth = (azimuth - self._prev_azimuth) % 36000
+        self._d_azimuth_history.append(d_azimuth)
 
         self._prev_azimuth = azimuth
 
@@ -82,7 +249,7 @@ class Visualizer:
         x = r * LOOKUP_SIN[azimuth]
         y = r * LOOKUP_COS[azimuth]
 
-        x_px = 700 + int(np.round(x * 50))
+        x_px = 400 + int(np.round(x * 50))
         y_px = 400 - int(np.round(y * 50))
         if x_px > self._X_MIN and x_px < self._X_MAX and y_px > self._Y_MIN and y_px < self._Y_MAX:
             self._map[y_px, x_px] = (0,0,0)
