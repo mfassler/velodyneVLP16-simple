@@ -16,12 +16,28 @@ import cv2
 from misc_utils import get_last_packet
 from misc_map_tools import make_map
 
+from SpeedControl import SpeedControl
+
+MOAB_COMPUTER = "192.168.1.201"
+BROADCAST_ADDR = "192.168.1.255"
+MOAB_PORT = 12346
+BCAST_PORT = 27311
+
+speedControl = SpeedControl(MOAB_COMPUTER, BROADCAST_ADDR, MOAB_PORT, BCAST_PORT)
+
+
 
 VELODYNE_PORT = 2368
 lidar_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 lidar_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
 lidar_sock.bind(("0.0.0.0", VELODYNE_PORT))
 
+
+# This is lat,lon,heading,speed from "LocationServices":
+NAV_PORT = 27201
+nav_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+nav_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+nav_sock.bind(("127.0.0.1", NAV_PORT))
 
 
 LOOKUP_COS = np.empty(36000)
@@ -40,10 +56,13 @@ if len(sys.argv) > 1:
     filename = sys.argv[1]
     vid_out = cv2.VideoWriter('cam_video.mjpg', cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'), 10, (800, 800))
 
-DO_NETWORK = True
+DO_NETWORK = False
 IMG_RECV_ADDRESS = ('127.0.0.1', 53521)
 
 DO_GUI = True
+
+
+steering_avg =0.0
 
 class Visualizer:
     def __init__(self):
@@ -103,7 +122,7 @@ class Visualizer:
             for line in lines:
                 rho, theta = line[0]
                 if theta < np.radians(30) or theta > np.radians(150):
-                    print(rho, theta)
+                    #print(rho, theta)
                     x_center = self.draw_a_line(rho, theta, (255,0,0))
                     cv2.circle(self.img, (x_center, 400), 3, (0,0,0), 2)
 
@@ -113,7 +132,7 @@ class Visualizer:
                     vec_x = np.sin(theta)
                     vec_y = np.cos(theta)
 
-                    print("x:", x_center)
+                    #print("x:", x_center)
                     if x_center < 395:
                         left_side.append( (x_center, vec_x, vec_y))
                     elif x_center > 405:
@@ -165,6 +184,9 @@ class Visualizer:
 
             cv2.arrowedLine(self.img, (400, 400), (x_target, y_target), (0,0,0), 2, 8)
 
+            steering = (x_target - 400) / 200.0
+            print(steering)
+            speedControl.set_throttle(steering, 0.4)
 
 
     def show_map(self):
@@ -172,8 +194,11 @@ class Visualizer:
         self._map = np.copy(self.__map)
         self.draw_hough_lines()
 
+
+        #params = [cv2.IMWRITE_PNG_COMPRESSION, 1]
+        params = [cv2.IMWRITE_JPEG_QUALITY, 20]
         if DO_NETWORK:
-            _nothing, pngBuffer = cv2.imencode('*.png', self.img)
+            _nothing, pngBuffer = cv2.imencode('*.jpg', self.img, params)
             bufLen = len(pngBuffer)
             filepos = 0
             numbytes = 0
@@ -229,13 +254,13 @@ class Visualizer:
         #if azimuth < self._prev_azimuth:
 
         # this puts the "seam" in the back (by the cable)
-        if self._prev_azimuth < 18000 and azimuth >= 18000:
+        if self._prev_azimuth < 13500 and azimuth >= 13500:
             myVis.show_map()
             #print(self._count)
             self._count = 0
 
         d_azimuth = (azimuth - self._prev_azimuth) % 36000
-        self._d_azimuth_history.append(d_azimuth)
+        #self._d_azimuth_history.append(d_azimuth)
 
         self._prev_azimuth = azimuth
 
@@ -262,7 +287,7 @@ myVis = Visualizer()
 
 
 while True:
-    inputs, outputs, errors = select.select([lidar_sock], [], [])
+    inputs, outputs, errors = select.select([lidar_sock, nav_sock], [], [])
     for oneInput in inputs:
         if oneInput == lidar_sock:
             #pkt, addr = lidar_sock.recvfrom(2048)
@@ -275,6 +300,21 @@ while True:
                     iStop = iStart + 100
                     data_block = pkt[iStart:iStop]
                     myVis.parse_data_block(data_block)
+
+        elif oneInput == nav_sock:
+            #pkt, addr = nav_sock.recvfrom(32)
+            pkt, addr = get_last_packet(nav_sock, 32, verbose=False)
+            try:
+                _current_lat, _current_lon, _current_hdg, _current_spd = \
+                    struct.unpack('!dddd', pkt)
+            except Exception as ee:
+                print('failed to parse location packet:', ee)
+            else:
+                speedControl.set_actual(_current_spd)
+
+
+
+
 
 
 
