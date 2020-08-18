@@ -6,7 +6,7 @@ import socket
 
 class SpeedControl:
     def __init__(self, moab_computer, broadcast_address,
-                 moab_port=12346, broadcast_port=27311):
+                 moab_port=12346, debug_port=27311):
 
         self.udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.udp_sock.bind(("0.0.0.0", 0))
@@ -14,7 +14,7 @@ class SpeedControl:
         self._MOAB_COMPUTER = moab_computer
         self._BROADCAST_ADDR = broadcast_address
         self._MOAB_PORT = moab_port
-        self._BCAST_PORT = broadcast_port
+        self._DEBUG_PORT = debug_port
         self._actual_speed = 0
         self._target_speed = 0
         self.K_p = 30
@@ -120,6 +120,6 @@ class SpeedControl:
                                  self._sbus_steering, self._sbus_throttle, output,
                                  _K_p, self._e, self.K_i, self._I,
                                  self._target_speed, self._actual_speed)
-                self.udp_sock.sendto(udpPacket2, (self._BROADCAST_ADDR, self._BCAST_PORT))
+                self.udp_sock.sendto(udpPacket2, (self._BROADCAST_ADDR, self._DEBUG_PORT))
 
 
