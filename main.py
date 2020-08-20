@@ -221,32 +221,6 @@ class Visualizer:
             vid_out.write(self.img)
 
 
-
-    def __not_used__showLines(self):
-        lines = cv2.HoughLines(self.img[:, 0], 1, np.pi / 180, 150, None, 0, 0)
-        
-        if lines is None:
-            print('no lines :-(')
-            return
-
-        cdst = np.copy(self.img)
-        self.lines = lines
-        for i in range(0, len(lines)):
-            rho = lines[i][0][0]
-            theta = lines[i][0][1]
-            a = np.cos(theta)
-            b = np.sin(theta)
-            x0 = a * rho
-            y0 = b * rho
-            pt1 = (int(x0 + 1000*(-b)), int(y0 + 1000*(a)))
-            pt2 = (int(x0 - 1000*(-b)), int(y0 - 1000*(a)))
-
-            cv2.line(cdst, pt1, pt2, (0,0,255), 2, cv2.LINE_AA)
-
-        cv2.imshow('qwerty', cdst)
-        cv2.waitKey(1)
-
-
     def parse_data_block(self, data_block):
         flag, azimuth = struct.unpack('HH', data_block[:4])
 
