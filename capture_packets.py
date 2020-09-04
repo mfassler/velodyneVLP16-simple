@@ -20,7 +20,7 @@ args = parser.parse_args()
 
 VELODYNE_PORT = 2368
 lidar_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-lidar_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+#lidar_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
 lidar_sock.bind(("0.0.0.0", VELODYNE_PORT))
 
 print('Attempting to capture data from a Velodyne VLP-16 Lidar...')
